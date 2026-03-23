@@ -1,7 +1,7 @@
 {
-  "name": "@ecoclaw/agent-ops",
+  "name": "@gonzih/agent-ops",
   "version": "0.1.0",
-  "description": "Ops layer for cc-tg agent fleet \u2014 discovery, control, log aggregation",
+  "description": "Ops layer for cc-tg agent fleet — discovery, control, log aggregation",
   "main": "dist/index.js",
   "bin": {
     "agent-ops": "dist/ops-bot.js"
@@ -18,8 +18,5 @@
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0",
     "@types/node-telegram-bot-api": "^0.64.0"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   }
 }
