@@ -80,6 +80,14 @@ export function createControlServer(opts: ControlServerOptions): http.Server {
       });
     }
 
+    if (req.method === "GET" && url.pathname === "/metrics") {
+      return json(res, 200, {
+        namespace: opts.agentRecord.namespace,
+        token_count: 0,
+        cost_usd: 0,
+      });
+    }
+
     return json(res, 404, { error: "not found" });
   });
 

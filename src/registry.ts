@@ -9,6 +9,7 @@ import { Redis } from "ioredis";
 
 export interface AgentRecord {
   id: string; // "{hostname}:{namespace}"
+  type: 'cc-tg' | 'openclaw' | 'codex' | 'ollama' | 'custom';
   hostname: string;
   user: string;
   bot_username: string;

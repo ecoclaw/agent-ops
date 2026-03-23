@@ -38,7 +38,7 @@ async function controlFetch(agent: AgentRecord, path: string, method = "GET"): P
 function agentLine(a: AgentRecord): string {
   const ago = Math.floor((Date.now() - new Date(a.last_seen).getTime()) / 1000);
   const status = ago < 90 ? "✅" : "❌";
-  return `${status} \`${a.id}\` — ${a.bot_username} @ ${a.hostname} (${ago}s ago)`;
+  return `${status} \`${a.id}\` [${a.type ?? 'cc-tg'}] — ${a.bot_username} @ ${a.hostname} (${ago}s ago)`;
 }
 
 function isAllowed(chatId: number): boolean {
@@ -129,6 +129,37 @@ bot.onText(/\/broadcast (.+)/, async (msg, match) => {
   bot.sendMessage(
     msg.chat.id,
     `Broadcast "\`${message}\`" — send this command to each agent's chat directly, or integrate with the control endpoint.`,
+    { parse_mode: "Markdown" }
+  );
+});
+
+bot.onText(/\/metrics/, async (msg) => {
+  if (!isAllowed(msg.chat.id)) return;
+  const agents = await registry.list();
+  if (agents.length === 0) return bot.sendMessage(msg.chat.id, "No agents registered.");
+
+  const results = await Promise.allSettled(
+    agents.map(async (a) => {
+      const res = await controlFetch(a, "/metrics");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json() as Promise<{ namespace: string; token_count: number; cost_usd: number }>;
+    })
+  );
+
+  let totalTokens = 0;
+  let totalCost = 0;
+  let supported = 0;
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      totalTokens += r.value.token_count ?? 0;
+      totalCost += r.value.cost_usd ?? 0;
+      supported++;
+    }
+  }
+
+  bot.sendMessage(
+    msg.chat.id,
+    `*Fleet metrics (${supported}/${agents.length} agents reporting):*\nTokens: \`${totalTokens.toLocaleString()}\`\nCost: \`$${totalCost.toFixed(4)}\``,
     { parse_mode: "Markdown" }
   );
 });
