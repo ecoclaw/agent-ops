@@ -1,40 +1,80 @@
-# agent-ops Architecture
+# Architecture
 
-## Control Endpoints (HTTP)
+## Components
 
-Each cc-tg agent exposes a lightweight HTTP server on `CC_AGENT_OPS_PORT`. Endpoints:
+### 1. Registry (`src/registry.ts`)
 
-- `GET /status` — returns JSON with namespace, pid, uptime, version
-- `POST /restart` — triggers `process.exit(0)` after 200ms (supervisor/pm2 restarts the process)
-- `GET /logs?lines=N` — tails the last N lines from `LOG_FILE`
+Redis-backed agent registry. Each cc-tg instance self-registers with a 120s TTL and sends heartbeats every 60s. Any agent missing 2 consecutive heartbeats is considered dead.
 
-**Why HTTP over SSH/pipes:** Works transparently over Tailscale and LAN without additional auth setup. cc-tg already has `process.exit` restart logic, so `/restart` is a thin wrapper. Zero TLS/key management on a trusted local network.
+**Key format:** `agent-ops:agent:{hostname}:{namespace}`
 
-## Agent Registry (Redis)
+**Record fields:**
+- `id` — unique `{hostname}:{namespace}`
+- `hostname`, `user`, `namespace` — identity
+- `bot_username` — Telegram bot handle
+- `cwd` — working directory
+- `pid` — current process ID
+- `version` — cc-tg version
+- `control_url` — HTTP control endpoint base URL
+- `started_at`, `last_seen` — timestamps
 
-Each agent self-registers at startup and refreshes a 90-second TTL key every 60 seconds. If a process dies, its entry expires automatically. The ops-bot queries Redis to discover all live agents.
+### 2. Control Server (`src/control.ts`)
 
-Key schema: `agent-ops:agent:<namespace>` → Redis Hash with fields matching `AgentRecord`.
+Minimal Node `http.Server` embedded in each cc-tg instance. Exposes three endpoints:
 
-## Integration with cc-tg
+- `GET /status` — returns agent record + uptime
+- `POST /restart` — calls `process.exit(0)`; launchd respawns (= auto-update with `--prefer-online`)
+- `GET /logs?lines=N` — returns last N lines of the log file
 
-cc-tg reads two optional env vars:
+Optional bearer token auth via `Authorization: Bearer <token>` header.
 
-- `CC_AGENT_OPS_PORT` — if set, start the HTTP control server on this port and register with Redis
-- `REDIS_URL` — already used by cc-agent; reused for the agent registry
+### 3. Ops Bot (`src/ops-bot.ts`)
+
+Single Telegram bot that:
+1. Reads the registry to discover all agents
+2. Makes HTTP calls to each agent's control endpoint
+3. Reports results back to the Telegram chat
+
+## cc-tg Integration Spec
+
+Add to `gonzih/cc-tg`:
 
 ```typescript
-import { Registry, startControlServer } from '@ecoclaw/agent-ops'
-// on start:
-if (process.env.CC_AGENT_OPS_PORT) {
-  const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379')
-  const registry = new Registry(redis)
-  await registry.register({ namespace, hostname, pid, version, cwd, control_port, ... })
-  setInterval(() => registry.heartbeat(namespace), 60_000)
-  startControlServer(Number(process.env.CC_AGENT_OPS_PORT), { logFile: process.env.LOG_FILE })
-}
+import { AgentRegistry, createControlServer } from "@ecoclaw/agent-ops";
+
+const registry = new AgentRegistry(process.env.REDIS_URL);
+await registry.connect();
+
+const record = {
+  id: `${hostname}:${namespace}`,
+  hostname: os.hostname(),
+  user: os.userInfo().username,
+  bot_username: botInfo.username,
+  cwd: process.cwd(),
+  namespace: process.env.NAMESPACE ?? "default",
+  pid: process.pid,
+  version: pkg.version,
+  control_url: `http://${os.hostname()}:${CONTROL_PORT}`,
+  started_at: new Date().toISOString(),
+};
+
+await registry.register(record);
+setInterval(() => registry.heartbeat(record.id), 60_000);
+
+createControlServer({
+  port: CONTROL_PORT,
+  logFile: process.env.LOG_FILE,
+  agentRecord: record,
+  authToken: process.env.CONTROL_AUTH_TOKEN,
+});
 ```
 
-## ops-bot
+## Network Topology
 
-Telegram bot that queries Redis for live agents and proxies commands to their control endpoints. Set `OPS_BOT_TOKEN`, `REDIS_URL`, and optionally `ALLOWED_USER_IDS` (comma-separated Telegram user IDs).
+All cc-tg instances and the ops bot must be on the same network segment (Tailscale recommended). The control endpoint port (default 8080) must be reachable from the ops bot host.
+
+## Security
+
+- Use `CONTROL_AUTH_TOKEN` to protect control endpoints
+- Restrict `ALLOWED_CHAT_IDS` to your personal Telegram chat
+- Run on Tailscale — don't expose control ports to the public internet
