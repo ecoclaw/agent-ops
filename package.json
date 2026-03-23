@@ -1,6 +1,6 @@
 {
   "name": "@gonzih/agent-ops",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Ops layer for cc-tg agent fleet — discovery, control, log aggregation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,8 +10,16 @@
     "start": "node dist/ops-bot.js",
     "dev": "tsx src/ops-bot.ts"
   },
-  "files": ["dist"],
-  "keywords": ["claude", "agents", "ops", "telegram", "cc-tg"],
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "claude",
+    "agents",
+    "ops",
+    "telegram",
+    "cc-tg"
+  ],
   "author": "ecoclaw",
   "license": "MIT",
   "dependencies": {
