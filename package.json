@@ -1,7 +1,7 @@
 {
-  "name": "@gonzih/agent-ops",
+  "name": "@ecoclaw/agent-ops",
   "version": "0.3.0",
-  "description": "Ops layer for cc-tg agent fleet — discovery, control, log aggregation",
+  "description": "Universal agent control plane — type-agnostic discovery, control, metrics aggregation for cc-tg, openclaw, codex, ollama, and custom agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -18,7 +18,11 @@
     "agents",
     "ops",
     "telegram",
-    "cc-tg"
+    "cc-tg",
+    "openclaw",
+    "codex",
+    "ollama",
+    "universal"
   ],
   "author": "ecoclaw",
   "license": "MIT",
