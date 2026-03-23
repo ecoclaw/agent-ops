@@ -15,6 +15,13 @@
   "keywords": ["telegram", "bot", "ops", "agent", "cc-tg"],
   "author": "ecoclaw",
   "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ecoclaw/agent-ops.git"
+  },
   "dependencies": {
     "ioredis": "5.3.2",
     "telegraf": "4.16.3"
