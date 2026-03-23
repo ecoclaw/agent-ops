@@ -1,0 +1,19 @@
+{
+  "name": "@gonzih/agent-ops-sdk",
+  "version": "0.1.0",
+  "description": "Self-registration SDK for agents joining the agent-ops fleet",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "files": ["dist"],
+  "keywords": ["claude", "agents", "ops", "sdk", "cc-tg", "agent-ops"],
+  "author": "gonzih",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "22.10.0",
+    "typescript": "5.7.2"
+  }
+}
