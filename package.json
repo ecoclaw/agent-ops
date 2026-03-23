@@ -1,6 +1,6 @@
 {
-  "name": "@ecoclaw/agent-ops",
-  "version": "0.1.0",
+  "name": "@gonzih/agent-ops",
+  "version": "0.2.0",
   "description": "Ops layer for cc-tg agent fleet — discovery, control, log aggregation",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
