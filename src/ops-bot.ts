@@ -1,177 +1,127 @@
 #!/usr/bin/env node
-/**
- * Telegram ops bot — monitors and controls cc-tg agent fleet.
- *
- * Required env vars:
- *   OPS_BOT_TOKEN   — Telegram bot token for the ops bot
- *   REDIS_URL       — Redis connection URL (default: redis://localhost:6379)
- *   OPS_ALLOWED_IDS — comma-separated list of Telegram user IDs allowed to use the bot
- */
-import { Telegraf, Context } from "telegraf";
-import { AgentRegistry } from "./registry.js";
-import { pingAgent, restartAgent, fetchAgentLogs } from "./control.js";
+import TelegramBot from 'node-telegram-bot-api'
+import Redis from 'ioredis'
+import * as http from 'http'
+import { Registry } from './registry'
 
-const TOKEN = process.env.OPS_BOT_TOKEN;
-if (!TOKEN) {
-  console.error("OPS_BOT_TOKEN is required");
-  process.exit(1);
+const OPS_BOT_TOKEN = process.env.OPS_BOT_TOKEN
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+const ALLOWED_USER_IDS = (process.env.ALLOWED_USER_IDS || '').split(',').map(s => parseInt(s.trim(), 10)).filter(Boolean)
+
+if (!OPS_BOT_TOKEN) {
+  console.error('OPS_BOT_TOKEN env var is required')
+  process.exit(1)
 }
 
-const ALLOWED_IDS = (process.env.OPS_ALLOWED_IDS ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const redis = new Redis(REDIS_URL)
+const registry = new Registry(redis)
+const bot = new TelegramBot(OPS_BOT_TOKEN, { polling: true })
 
-const registry = new AgentRegistry(process.env.REDIS_URL);
-const bot = new Telegraf(TOKEN);
-
-function isAllowed(ctx: Context): boolean {
-  if (ALLOWED_IDS.length === 0) return true;
-  return ALLOWED_IDS.includes(String(ctx.from?.id));
+function isAllowed(userId: number): boolean {
+  return ALLOWED_USER_IDS.length === 0 || ALLOWED_USER_IDS.includes(userId)
 }
 
-function guard(ctx: Context): boolean {
-  if (!isAllowed(ctx)) {
-    void ctx.reply("Unauthorized.");
-    return false;
-  }
-  return true;
+function httpGet(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    http.get(url, (res) => {
+      let data = ''
+      res.on('data', (chunk: string) => data += chunk)
+      res.on('end', () => resolve(data))
+    }).on('error', reject)
+  })
 }
 
-/** /agents — list all live agents from registry */
-bot.command("agents", async (ctx) => {
-  if (!guard(ctx)) return;
+function httpPost(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const req = http.request({ hostname: parsed.hostname, port: parsed.port, path: parsed.pathname, method: 'POST' }, (res) => {
+      let data = ''
+      res.on('data', (chunk: string) => data += chunk)
+      res.on('end', () => resolve(data))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+bot.onText(/\/agents/, async (msg) => {
+  if (!isAllowed(msg.from?.id || 0)) return
   try {
-    const agents = await registry.listAgents();
+    const agents = await registry.listAgents()
     if (agents.length === 0) {
-      await ctx.reply("No agents registered.");
-      return;
+      await bot.sendMessage(msg.chat.id, 'No agents registered.')
+      return
     }
-    const lines = agents.map(
-      (a) =>
-        `• *${a.namespace}/${a.bot_username}* @ ${a.hostname}\n  pid:${a.pid} port:${a.control_port} v${a.version}\n  started: ${a.started_at}`
-    );
-    await ctx.reply(lines.join("\n\n"), { parse_mode: "Markdown" });
-  } catch (err) {
-    await ctx.reply(`Error: ${String(err)}`);
+    const now = Date.now()
+    const lines = agents.map(a => {
+      const ageMs = now - parseInt(a.started_at, 10)
+      const ageSec = Math.floor(ageMs / 1000)
+      const ageStr = ageSec > 3600 ? `${Math.floor(ageSec/3600)}h` : ageSec > 60 ? `${Math.floor(ageSec/60)}m` : `${ageSec}s`
+      return `• ${a.namespace} @ ${a.hostname} pid=${a.pid} v${a.version} age=${ageStr}`
+    })
+    await bot.sendMessage(msg.chat.id, `Registered agents:\n${lines.join('\n')}`)
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `Error: ${e}`)
   }
-});
+})
 
-/** /health — ping each agent's control endpoint */
-bot.command("health", async (ctx) => {
-  if (!guard(ctx)) return;
+bot.onText(/\/health/, async (msg) => {
+  if (!isAllowed(msg.from?.id || 0)) return
   try {
-    const agents = await registry.listAgents();
+    const agents = await registry.listAgents()
     if (agents.length === 0) {
-      await ctx.reply("No agents registered.");
-      return;
+      await bot.sendMessage(msg.chat.id, 'No agents registered.')
+      return
     }
-    const results = await Promise.all(
-      agents.map(async (a) => {
-        const status = await pingAgent(a.control_host, a.control_port);
-        const icon = status ? "✅" : "❌";
-        const uptime = status
-          ? ` uptime ${Math.round((status.uptime_ms as number) / 1000)}s`
-          : " unreachable";
-        return `${icon} *${a.namespace}/${a.bot_username}*${uptime}`;
-      })
-    );
-    await ctx.reply(results.join("\n"), { parse_mode: "Markdown" });
-  } catch (err) {
-    await ctx.reply(`Error: ${String(err)}`);
+    const results = await Promise.all(agents.map(async (a) => {
+      try {
+        await httpGet(`http://${a.hostname}:${a.control_port}/status`)
+        return `✓ ${a.namespace}`
+      } catch {
+        return `✗ ${a.namespace}`
+      }
+    }))
+    await bot.sendMessage(msg.chat.id, results.join('\n'))
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `Error: ${e}`)
   }
-});
+})
 
-/**
- * /restart <name> — POST /restart to agent matching name.
- * <name> can be namespace/bot_username or just bot_username.
- */
-bot.command("restart", async (ctx) => {
-  if (!guard(ctx)) return;
-  const name = ctx.message.text.replace(/^\/restart\s*/, "").trim();
-  if (!name) {
-    await ctx.reply("Usage: /restart <name>");
-    return;
-  }
+bot.onText(/\/restart (.+)/, async (msg, match) => {
+  if (!isAllowed(msg.from?.id || 0)) return
+  const namespace = match?.[1]?.trim()
+  if (!namespace) return
   try {
-    const agents = await registry.listAgents();
-    const agent = agents.find(
-      (a) => a.bot_username === name || `${a.namespace}/${a.bot_username}` === name
-    );
+    const agents = await registry.listAgents()
+    const agent = agents.find(a => a.namespace === namespace)
     if (!agent) {
-      await ctx.reply(`No agent found matching: ${name}`);
-      return;
+      await bot.sendMessage(msg.chat.id, `Agent ${namespace} not found.`)
+      return
     }
-    await ctx.reply(`Sending restart to ${agent.namespace}/${agent.bot_username}...`);
-    const ok = await restartAgent(agent.control_host, agent.control_port);
-    await ctx.reply(
-      ok
-        ? `✅ Restart signal sent to ${agent.namespace}/${agent.bot_username}. It should come back online shortly.`
-        : `❌ Failed to reach ${agent.namespace}/${agent.bot_username} control endpoint.`
-    );
-  } catch (err) {
-    await ctx.reply(`Error: ${String(err)}`);
+    await httpPost(`http://${agent.hostname}:${agent.control_port}/restart`)
+    await bot.sendMessage(msg.chat.id, `Restart signal sent to ${namespace}.`)
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `Error: ${e}`)
   }
-});
+})
 
-/** /logs <name> — fetch last 50 log lines from agent */
-bot.command("logs", async (ctx) => {
-  if (!guard(ctx)) return;
-  const name = ctx.message.text.replace(/^\/logs\s*/, "").trim();
-  if (!name) {
-    await ctx.reply("Usage: /logs <name>");
-    return;
-  }
+bot.onText(/\/logs (.+)/, async (msg, match) => {
+  if (!isAllowed(msg.from?.id || 0)) return
+  const namespace = match?.[1]?.trim()
+  if (!namespace) return
   try {
-    const agents = await registry.listAgents();
-    const agent = agents.find(
-      (a) => a.bot_username === name || `${a.namespace}/${a.bot_username}` === name
-    );
+    const agents = await registry.listAgents()
+    const agent = agents.find(a => a.namespace === namespace)
     if (!agent) {
-      await ctx.reply(`No agent found matching: ${name}`);
-      return;
+      await bot.sendMessage(msg.chat.id, `Agent ${namespace} not found.`)
+      return
     }
-    const lines = await fetchAgentLogs(agent.control_host, agent.control_port, 50);
-    if (!lines) {
-      await ctx.reply(`❌ Could not fetch logs from ${name}`);
-      return;
-    }
-    const text = lines.filter(Boolean).join("\n");
-    const truncated = text.length > 3800 ? "...\n" + text.slice(text.length - 3800) : text;
-    await ctx.reply(`\`\`\`\n${truncated}\n\`\`\``, { parse_mode: "Markdown" });
-  } catch (err) {
-    await ctx.reply(`Error: ${String(err)}`);
+    const logs = await httpGet(`http://${agent.hostname}:${agent.control_port}/logs?lines=50`)
+    const truncated = logs.length > 4000 ? logs.slice(-4000) : logs
+    await bot.sendMessage(msg.chat.id, `Logs for ${namespace}:\n\`\`\`\n${truncated}\n\`\`\``, { parse_mode: 'Markdown' })
+  } catch (e) {
+    await bot.sendMessage(msg.chat.id, `Error: ${e}`)
   }
-});
+})
 
-/** /help and /start */
-bot.command(["help", "start"], async (ctx) => {
-  if (!guard(ctx)) return;
-  const help = [
-    "*agent-ops bot*",
-    "",
-    "/agents — list all registered agents",
-    "/health — ping each agent's control endpoint",
-    "/restart <name> — restart an agent (name = bot\\_username or namespace/bot\\_username)",
-    "/logs <name> — fetch last 50 log lines from agent",
-  ].join("\n");
-  await ctx.reply(help, { parse_mode: "Markdown" });
-});
-
-async function main() {
-  await registry.connect();
-  console.log("[ops-bot] connected to Redis, polling Telegram...");
-
-  process.once("SIGTERM", async () => {
-    bot.stop("SIGTERM");
-    await registry.disconnect();
-  });
-  process.once("SIGINT", async () => {
-    bot.stop("SIGINT");
-    await registry.disconnect();
-  });
-
-  await bot.launch();
-}
-
-void main();
+console.log('ops-bot running')
