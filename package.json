@@ -1,6 +1,6 @@
 {
   "name": "@gonzih/agent-ops",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "description": "Universal agent control plane — type-agnostic discovery, control, metrics aggregation for cc-tg, openclaw, codex, ollama, and custom agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
