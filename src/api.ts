@@ -13,6 +13,7 @@ import http from "node:http";
 import { AgentRegistry, AgentRecord } from "./registry.js";
 import { CcTgAdapter } from "./adapters/cc-tg.js";
 import { CustomHttpAdapter } from "./adapters/custom-http.js";
+import { GenericHttpAdapter } from "./adapters/generic-http.js";
 
 export interface RegistryApiOptions {
   port: number;
@@ -46,20 +47,31 @@ function parseAgentPath(pathname: string): { id: string; action?: string } | nul
   return { id: decodeURIComponent(m[1]), action: m[2] };
 }
 
+/** Resolve the effective agent type and control URL, preferring canonical fields. */
+function resolveAgent(agent: AgentRecord): { effectiveType: string; endpoint: string } {
+  const effectiveType = agent.agentType ?? agent.type ?? "custom";
+  const endpoint = agent.controlEndpoint ?? agent.control_url;
+  return { effectiveType, endpoint };
+}
+
 async function dispatchRestart(agent: AgentRecord, controlAuthToken?: string): Promise<unknown> {
-  switch (agent.type) {
+  const { effectiveType, endpoint } = resolveAgent(agent);
+  switch (effectiveType) {
     case "cc-tg": {
       const adapter = new CcTgAdapter();
-      return adapter.restart(agent.control_url, controlAuthToken);
+      return adapter.restart(endpoint, controlAuthToken);
     }
     case "openclaw":
     case "codex":
     case "custom": {
       const adapter = new CustomHttpAdapter();
-      return adapter.restart(agent.control_url, controlAuthToken);
+      return adapter.restart(endpoint, controlAuthToken);
     }
-    default:
-      throw new Error(`No restart adapter for type: ${agent.type}`);
+    default: {
+      // Unknown type — fall through to generic HTTP adapter
+      const adapter = new GenericHttpAdapter();
+      return adapter.restart(endpoint, controlAuthToken);
+    }
   }
 }
 
@@ -68,19 +80,23 @@ async function dispatchLogs(
   lines: number,
   controlAuthToken?: string,
 ): Promise<string> {
-  switch (agent.type) {
+  const { effectiveType, endpoint } = resolveAgent(agent);
+  switch (effectiveType) {
     case "cc-tg": {
       const adapter = new CcTgAdapter();
-      return adapter.logs(agent.control_url, lines, controlAuthToken);
+      return adapter.logs(endpoint, lines, controlAuthToken);
     }
     case "openclaw":
     case "codex":
     case "custom": {
       const adapter = new CustomHttpAdapter();
-      return adapter.logs(agent.control_url, lines, controlAuthToken);
+      return adapter.logs(endpoint, lines, controlAuthToken);
     }
-    default:
-      throw new Error(`No logs adapter for type: ${agent.type}`);
+    default: {
+      // Unknown type — fall through to generic HTTP adapter
+      const adapter = new GenericHttpAdapter();
+      return adapter.logs(endpoint, lines, controlAuthToken);
+    }
   }
 }
 

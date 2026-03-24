@@ -6,3 +6,5 @@ export { CodexAdapter } from "./codex.js";
 export type { CodexHealthResult } from "./codex.js";
 export { CustomHttpAdapter } from "./custom-http.js";
 export type { CustomHealthResult } from "./custom-http.js";
+export { GenericHttpAdapter } from "./generic-http.js";
+export type { GenericHttpStatus } from "./generic-http.js";
