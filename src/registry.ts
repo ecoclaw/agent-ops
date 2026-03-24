@@ -10,6 +10,8 @@ import { Redis } from "ioredis";
 export interface AgentRecord {
   id: string; // "{hostname}:{namespace}"
   type?: 'cc-tg' | 'openclaw' | 'codex' | 'ollama' | 'custom';
+  /** Canonical agent type for adapter routing. Preferred over `type`. */
+  agentType?: 'cc-tg' | 'openclaw' | 'custom';
   hostname: string;
   user: string;
   bot_username: string;
@@ -17,7 +19,9 @@ export interface AgentRecord {
   namespace: string;
   pid: number;
   version: string;
-  control_url: string; // "http://host:port" for HTTP control endpoint
+  control_url: string; // "http://host:port" for HTTP control endpoint (legacy)
+  /** Canonical HTTP control endpoint URL (GET /status, POST /restart). Preferred over `control_url`. */
+  controlEndpoint?: string;
   started_at: string; // ISO8601
   last_seen: string; // ISO8601
 }
