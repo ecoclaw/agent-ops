@@ -11,9 +11,7 @@
 
 import http from "node:http";
 import { AgentRegistry, AgentRecord } from "./registry.js";
-import { CcTgAdapter } from "./adapters/cc-tg.js";
-import { CustomHttpAdapter } from "./adapters/custom-http.js";
-import { GenericHttpAdapter } from "./adapters/generic-http.js";
+import { createAdapter } from "./adapters/index.js";
 
 export interface RegistryApiOptions {
   port: number;
@@ -56,23 +54,7 @@ function resolveAgent(agent: AgentRecord): { effectiveType: string; endpoint: st
 
 async function dispatchRestart(agent: AgentRecord, controlAuthToken?: string): Promise<unknown> {
   const { effectiveType, endpoint } = resolveAgent(agent);
-  switch (effectiveType) {
-    case "cc-tg": {
-      const adapter = new CcTgAdapter();
-      return adapter.restart(endpoint, controlAuthToken);
-    }
-    case "openclaw":
-    case "codex":
-    case "custom": {
-      const adapter = new CustomHttpAdapter();
-      return adapter.restart(endpoint, controlAuthToken);
-    }
-    default: {
-      // Unknown type — fall through to generic HTTP adapter
-      const adapter = new GenericHttpAdapter();
-      return adapter.restart(endpoint, controlAuthToken);
-    }
-  }
+  return createAdapter(effectiveType).restart(endpoint, controlAuthToken);
 }
 
 async function dispatchLogs(
@@ -81,23 +63,7 @@ async function dispatchLogs(
   controlAuthToken?: string,
 ): Promise<string> {
   const { effectiveType, endpoint } = resolveAgent(agent);
-  switch (effectiveType) {
-    case "cc-tg": {
-      const adapter = new CcTgAdapter();
-      return adapter.logs(endpoint, lines, controlAuthToken);
-    }
-    case "openclaw":
-    case "codex":
-    case "custom": {
-      const adapter = new CustomHttpAdapter();
-      return adapter.logs(endpoint, lines, controlAuthToken);
-    }
-    default: {
-      // Unknown type — fall through to generic HTTP adapter
-      const adapter = new GenericHttpAdapter();
-      return adapter.logs(endpoint, lines, controlAuthToken);
-    }
-  }
+  return createAdapter(effectiveType).logs(endpoint, lines, controlAuthToken);
 }
 
 export function createRegistryApi(opts: RegistryApiOptions): http.Server {
@@ -145,6 +111,17 @@ export function createRegistryApi(opts: RegistryApiOptions): http.Server {
       if (req.method === "DELETE" && !action) {
         await registry.deregister(id);
         return json(res, 200, { ok: true });
+      }
+
+      // GET /agents/:id/status
+      if (req.method === "GET" && action === "status") {
+        const agent = await registry.get(id);
+        if (!agent) return json(res, 404, { error: `agent ${id} not found` });
+        const { effectiveType, endpoint } = resolveAgent(agent);
+        const adapter = createAdapter(effectiveType);
+        const result = await (adapter as { status?: (e: string, t?: string) => Promise<unknown> })
+          .status?.(endpoint, opts.controlAuthToken) ?? { endpoint, agentType: effectiveType };
+        return json(res, 200, result);
       }
 
       // POST /agents/:id/restart

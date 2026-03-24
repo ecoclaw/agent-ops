@@ -4,11 +4,12 @@ export { createControlServer } from "./control.js";
 export type { ControlServerOptions } from "./control.js";
 export { createRegistryApi } from "./api.js";
 export type { RegistryApiOptions } from "./api.js";
-export { CcTgAdapter, OpenclawAdapter, CodexAdapter, CustomHttpAdapter, GenericHttpAdapter } from "./adapters/index.js";
+export { CcTgAdapter, OpenclawAdapter, CodexAdapter, CustomHttpAdapter, GenericHttpAdapter, createAdapter } from "./adapters/index.js";
 export type {
   CcTgStatus,
   OpenclawHealthResult,
   CodexHealthResult,
   CustomHealthResult,
   GenericHttpStatus,
+  ControlAdapter,
 } from "./adapters/index.js";
